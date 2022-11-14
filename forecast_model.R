@@ -10,7 +10,7 @@ forecast_date <- Sys.Date()
 noaa_date <- Sys.Date() - days(3)  #Need to use yesterday's NOAA forecast because today's is not available yet
 
 # Step 0: Define a unique name which will identify your model in the leaderboard and connect it to team members info, etc
-model_id <- "neon4cast_example"
+model_id <- "GLEON_JRabaey_temp_physics"
 
 # Step 1: Download latest target data and site description data
 target <- readr::read_csv(paste0("https://data.ecoforecast.org/neon4cast-targets/",
@@ -87,39 +87,63 @@ forecast_site <- function(site) {
   rm(noaa_past_mean) # save RAM 
   
   # Fit linear model based o # n past data: water temperature = m * air temperature + b
-  fit <- lm(temperature ~ air_temperature, data = site_target)
+  #fit <- lm(temperature ~ air_temperature, data = site_target)
   
   #  Get 30-day predicted temperature ensemble at the site
   noaa_future <- noaa_mean_forecast(site, "TMP", noaa_date)
   
   # use the linear model (predict.lm) to forecast water temperature for each ensemble member
-  temperature <- 
-    noaa_future |> 
-    mutate(site_id = site,
-           prediction = predict(fit, tibble(air_temperature)),
-           variable = "temperature")
+  #temperature <- 
+    #noaa_future |> 
+    #mutate(site_id = site,
+           #prediction = predict(fit, tibble(air_temperature)),
+           #variable = "temperature")
+  
+  # Fit physics process model (water temp will equilibrate with air temp slowly)
+  forecast_start <- tail(site_target, n =1)
+  site_forecast <- NULL
+  for(i in 1:30){
+    forecast_data <- noaa_future[noaa_future$ensemble == i,]
+    forecast_data <- rbind(select(forecast_start, -temperature, -site_id, -oxygen) %>% mutate(ensemble = i),
+                           forecast_data)
+    forecast_data$mod_temp_pred <- forecast_start$temperature
+    
+    for(i in 2:length(forecast_data$mod_temp_pred)){
+      forecast_data$mod_temp_pred[i] <- forecast_data$mod_temp_pred[i-1] + 0.2 * 
+        (forecast_data$air_temperature[i] - forecast_data$mod_temp_pred[i-1])
+      if(forecast_data$mod_temp_pred[i] <= 0){
+        forecast_data$mod_temp_pred[i] <- 0.1
+      }
+    }
+    site_forecast <- dplyr::bind_rows(site_forecast, forecast_data[-1,])
+  }
   
   # use forecasted water temperature to predict oxygen by assuming that oxygen is saturated.
-  forecasted_oxygen <- 
-    rMR::Eq.Ox.conc(temperature$prediction, 
-                    elevation.m = site_info$field_mean_elevation_m,
-                    bar.press = NULL,
-                    bar.units = NULL,
-                    out.DO.meas = "mg/L",
-                    salinity = 0,
-                    salinity.units = "pp.thou")
+  #forecasted_oxygen <- 
+    #rMR::Eq.Ox.conc(temperature$prediction, 
+                    #elevation.m = site_info$field_mean_elevation_m,
+                    #bar.press = NULL,
+                    #bar.units = NULL,
+                    #out.DO.meas = "mg/L",
+                    #salinity = 0,
+                    #salinity.units = "pp.thou")
   # stick bits together                  
-  oxygen <- 
-    noaa_future |> 
-    mutate(site_id = site,
-           prediction = forecasted_oxygen,
-           variable = "oxygen")
+  #oxygen <- 
+   # noaa_future |> 
+    #mutate(site_id = site,
+     #      prediction = forecasted_oxygen,
+      #     variable = "oxygen")
   
-  forecast <- dplyr::bind_rows(temperature, oxygen)
+
+  temperature <- rename(site_forecast, prediction = "mod_temp_pred") %>%
+    mutate(variable = "temperature")
+  
+  forecast <- dplyr::bind_rows(temperature)
   
   # Format results to EFI standard
   forecast <- forecast |>
     mutate(reference_datetime = forecast_date,
+           site_id = site,
            family = "ensemble",
            model_id = model_id) |>
     rename(parameter = ensemble) |>
