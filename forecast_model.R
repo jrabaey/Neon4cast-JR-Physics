@@ -4,7 +4,7 @@ library(neon4cast)
 library(lubridate)
 library(rMR)
 library(glue)
-source("ignore_sigpipe.R")
+#source("ignore_sigpipe.R")
 
 forecast_date <- Sys.Date()
 noaa_date <- Sys.Date() - days(3)  #Need to use yesterday's NOAA forecast because today's is not available yet
@@ -111,8 +111,10 @@ forecast_site <- function(site) {
     for(i in 2:length(forecast_data$mod_temp_pred)){
       forecast_data$mod_temp_pred[i] <- forecast_data$mod_temp_pred[i-1] + 0.2 * 
         (forecast_data$air_temperature[i] - forecast_data$mod_temp_pred[i-1])
-      if(forecast_data$mod_temp_pred[i] <= 0){
-        forecast_data$mod_temp_pred[i] <- 0.1
+      if(!is.na(forecast_data$mod_temp_pred[i])){
+        if(forecast_data$mod_temp_pred[i] <= 0){
+          forecast_data$mod_temp_pred[i] <- 0.1
+        }
       }
     }
     site_forecast <- dplyr::bind_rows(site_forecast, forecast_data[-1,])
